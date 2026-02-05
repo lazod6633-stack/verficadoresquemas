@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verificador de Esquema Numérico</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel" data-type="module">
+        const { useState, useEffect } = React;
+        const { createRoot } = ReactDOM;
+        
+        // Simulación de window.storage para ambiente standalone
+        if (!window.storage) {
+            window.storage = {
+                async get(key) {
+                    const value = localStorage.getItem(key);
+                    return value ? { key, value, shared: false } : null;
+                },
+                async set(key, value) {
+                    localStorage.setItem(key, value);
+                    return { key, value, shared: false };
+                },
+                async delete(key) {
+                    localStorage.removeItem(key);
+                    return { key, deleted: true, shared: false };
+                },
+                async list(prefix) {
+                    const keys = Object.keys(localStorage)
+                        .filter(k => !prefix || k.startsWith(prefix));
+                    return { keys, prefix, shared: false };
+                }
+            };
+        }
+
+        function App() {
+            const [outlineText, setOutlineText] = useState('');
+            const [results, setResults] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [mode, setMode] = useState('diagnostic');
+            const [showMetaReflection, setShowMetaReflection] = useState(false);
+            const [darkMode, setDarkMode] = useState(false);
+            const [savedOutlines, setSavedOutlines] = useState([]);
+            const [currentOutlineId, setCurrentOutlineId] = useState(null);
+            const [currentOutlineName, setCurrentOutlineName] = useState('');
+            const [showHistory, setShowHistory] = useState(false);
+            const [showDashboard, setShowDashboard] = useState(false);
+            const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+            const [lastSaved, setLastSaved] = useState(null);
+
+            const modeDescriptions = {
+                diagnostic: {
+                    title: 'Diagnóstico Completo',
+                    description: 'Te muestra QUÉ está mal, POR QUÉ no funciona, y CÓMO solucionarlo paso a paso',
+                    icon: '🔍',
+                    whenToUse: 'Primera versión del esquema o cuando necesitas orientación clara'
+                },
+                formative: {
+                    title: 'Guía Formativa',
+                    description: 'Preguntas reflexivas que te guían a descubrir la solución por ti mismo',
+                    icon: '🎓',
+                    whenToUse: 'Segunda/tercera revisión, para desarrollar pensamiento crítico'
+                },
+                exploratory: {
+                    title: 'Exploración Abierta',
+                    description: 'Múltiples caminos posibles sin una única respuesta correcta',
+                    icon: '🧭',
+                    whenToUse: 'Esquemas avanzados donde quieres experimentar con diferentes enfoques'
+                }
+            };
+
+            useEffect(() => {
+                loadFromStorage();
+            }, []);
+
+            useEffect(() => {
+                if (autoSaveEnabled && outlineText && currentOutlineId) {
+                    const timer = setTimeout(() => {
+                        saveOutline(true);
+                    }, 2000);
+                    return () => clearTimeout(timer);
+                }
+            }, [outlineText, autoSaveEnabled, currentOutlineId]);
+
+            const loadFromStorage = async () => {
+                try {
+                    const stored = await window.storage.list('outline:');
+                    if (stored && stored.keys) {
+                        const outlines = [];
+                        for (const key of stored.keys) {
+                            const data = await window.storage.get(key);
+                            if (data) {
+                                outlines.push(JSON.parse(data.value));
+                            }
+                        }
+                        setSavedOutlines(outlines.sort((a, b) => b.timestamp - a.timestamp));
+                    }
+                } catch (error) {
+                    console.log('Primera vez usando la app');
+                }
+            };
+
+            const saveOutline = async (isAutoSave = false) => {
+                if (!outlineText.trim()) return;
+                
+                const id = currentOutlineId || `outline:${Date.now()}`;
+                const name = currentOutlineName || `Esquema ${new Date().toLocaleDateString()}`;
+                
+                const outlineData = {
+                    id,
+                    name,
+                    text: outlineText,
+                    results: results,
+                    mode,
+                    timestamp: Date.now(),
+                    version: (savedOutlines.find(o => o.id === id)?.version || 0) + 1
+                };
+
+                try {
+                    await window.storage.set(id, JSON.stringify(outlineData));
+                    setCurrentOutlineId(id);
+                    setLastSaved(new Date());
+                    await loadFromStorage();
+                    
+                    if (!isAutoSave) {
+                        alert('✅ Esquema guardado exitosamente');
+                    }
+                } catch (error) {
+                    console.error('Error al guardar:', error);
+                }
+            };
+
+            const loadOutline = (outline) => {
+                setOutlineText(outline.text);
+                setResults(outline.results);
+                setMode(outline.mode);
+                setCurrentOutlineId(outline.id);
+                setCurrentOutlineName(outline.name);
+                setShowHistory(false);
+            };
+
+            const deleteOutline = async (id) => {
+                if (!confirm('¿Seguro que quieres eliminar este esquema?')) return;
+                
+                try {
+                    await window.storage.delete(id);
+                    await loadFromStorage();
+                    if (currentOutlineId === id) {
+                        setOutlineText('');
+                        setResults(null);
+                        setCurrentOutlineId(null);
+                        setCurrentOutlineName('');
+                    }
+                } catch (error) {
+                    console.error('Error al eliminar:', error);
+                }
+            };
+
+            const createNewOutline = () => {
+                setOutlineText('');
+                setResults(null);
+                setCurrentOutlineId(null);
+                setCurrentOutlineName('');
+            };
+
+            const exportToPDF = () => {
+                const content = `ANÁLISIS DE ESQUEMA NUMÉRICO
+=============================
+
+Esquema: ${currentOutlineName || 'Sin nombre'}
+Fecha: ${new Date().toLocaleString()}
+Modo: ${modeDescriptions[mode].title}
+
+TEXTO DEL ESQUEMA:
+${outlineText}
+
+EVALUACIÓN: ${results?.overallLevel || 'No evaluado'}
+
+ESTADÍSTICAS:
+- Nivel jerárquico: ${results?.stats.hierarchyLevel}
+- Ideas secundarias: ${results?.stats.totalSecondaries}
+- Aplicaciones del caso: ${results?.stats.totalApplications}
+
+ERRORES ENCONTRADOS: ${results?.errors.length || 0}
+ADVERTENCIAS: ${results?.warnings.length || 0}
+FORTALEZAS: ${results?.strengths.length || 0}
+                `;
+                
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `analisis-esquema-${Date.now()}.txt`;
+                a.click();
+            };
+
+            const calculateStats = () => {
+                if (savedOutlines.length === 0) return null;
+                
+                const totalAnalyses = savedOutlines.filter(o => o.results).length;
+                const logrados = savedOutlines.filter(o => o.results?.overallLevel === 'Logrado').length;
+                const enProceso = savedOutlines.filter(o => o.results?.overallLevel === 'En proceso').length;
+                
+                return {
+                    total: savedOutlines.length,
+                    analyzed: totalAnalyses,
+                    logrados,
+                    enProceso,
+                    successRate: totalAnalyses > 0 ? Math.round((logrados / totalAnalyses) * 100) : 0
+                };
+            };
+
+            const analyzeOutline = () => {
+                setLoading(true);
+                setTimeout(() => {
+                    const lines = outlineText.split('\n').filter(l => l.trim().length > 0);
+                    const errors = [];
+                    const warnings = [];
+                    const strengths = [];
+                    const structure = { principal: null, secondaries: [], tertiaries: [], quaternaries: [] };
+                    const allItems = [];
+
+                    lines.forEach((line, idx) => {
+                        const trimmed = line.trim();
+                        const lineNum = idx + 1;
+                        let level = 'unknown';
+                        let numeration = '';
+
+                        if (trimmed.match(/^1\.(\s|[A-Z])/)) {
+                            level = 'principal';
+                            numeration = '1.';
+                        } else if (trimmed.match(/^1\.\d+\.(\s|[A-Z])/)) {
+                            level = 'secondary';
+                            numeration = trimmed.match(/^1\.\d+\./)[0];
+                        } else if (trimmed.match(/^1\.\d+\.\d+\.(\s|[A-Z])/)) {
+                            level = 'tertiary';
+                            numeration = trimmed.match(/^1\.\d+\.\d+\./)[0];
+                        } else if (trimmed.match(/^1\.\d+\.\d+\.\d+\.(\s|[A-Z])/)) {
+                            level = 'quaternary';
+                            numeration = trimmed.match(/^1\.\d+\.\d+\.\d+\./)[0];
+                        }
+
+                        const item = { text: trimmed, level, numeration, lineNum };
+                        allItems.push(item);
+
+                        if (level === 'principal') structure.principal = item;
+                        else if (level === 'secondary') structure.secondaries.push(item);
+                        else if (level === 'tertiary') structure.tertiaries.push(item);
+                        else if (level === 'quaternary') structure.quaternaries.push(item);
+                    });
+
+                    const hasThirdLevel = structure.tertiaries.length > 0;
+                    const hasFourthLevel = structure.quaternaries.length > 0;
+
+                    if (!hasThirdLevel) {
+                        errors.push({
+                            type: 'insufficient_hierarchy',
+                            severity: 'high',
+                            currentLevel: structure.secondaries.length > 0 ? 'segundo' : 'primer',
+                            context: {}
+                        });
+                    } else {
+                        strengths.push({
+                            type: 'adequate_hierarchy',
+                            message: hasFourthLevel ? 
+                                'Excelente: Esquema con jerarquía de cuarto nivel' :
+                                'Logrado: Esquema con jerarquía de tercer nivel'
+                        });
+                    }
+
+                    if (!structure.principal) {
+                        errors.push({ type: 'missing_principal', severity: 'high', context: {} });
+                    }
+
+                    structure.secondaries.forEach((sec, idx) => {
+                        const hasCitation = sec.text.match(/\([^)]*[A-Z][a-z]+.*\d{4}[^)]*\)/);
+                        if (!hasCitation) {
+                            errors.push({
+                                type: 'secondary_no_reference',
+                                severity: 'high',
+                                item: sec.
